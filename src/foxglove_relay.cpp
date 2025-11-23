@@ -29,33 +29,6 @@
 namespace data_tamer_tools
 {
 
-static foxglove::schemas::Log::LogLevel toFoxgloveLevel(uint8_t ros_level)
-{
-    using FG = foxglove::schemas::Log::LogLevel;
-    // ROS: 10=DEBUG,20=INFO,30=WARN,40=ERROR,50=FATAL
-    if (ros_level >= 50)
-    {
-        return FG::FATAL;
-    }
-    if (ros_level >= 40)
-    {
-        return FG::ERROR;
-    }
-    if (ros_level >= 30)
-    {
-        return FG::WARNING;
-    }
-    if (ros_level >= 20)
-    {
-        return FG::INFO;
-    }
-    if (ros_level >= 10)
-    {
-        return FG::DEBUG;
-    }
-    return FG::UNKNOWN;
-}
-
 struct ChannelInfo
 {
     std::string topic;                              // ROS2 topic (for reference)
@@ -241,17 +214,6 @@ class DtRos2ToFoxgloveBridge : public rclcpp::Node
         rosout_topic_desc.read_only = true;
         const std::string rosout_topic = declare_parameter<std::string>("rosout_topic", "/rosout", rosout_topic_desc);
 
-        rcl_interfaces::msg::ParameterDescriptor rosout_min_lvl_desc;
-        rosout_min_lvl_desc.type = rclcpp::ParameterType::PARAMETER_INTEGER;
-        rosout_min_lvl_desc.name = "rosout_min_level";
-        rosout_min_lvl_desc.description = "Minimum ROS log level to relay (10=DEBUG,20=INFO,30=WARN,40=ERROR,50=FATAL)";
-        rosout_min_lvl_desc.read_only = true;
-        rosout_min_lvl_desc.integer_range.resize(1);
-        rosout_min_lvl_desc.integer_range[0].from_value = 10;
-        rosout_min_lvl_desc.integer_range[0].to_value = 50;
-        rosout_min_lvl_desc.integer_range[0].step = 10;
-        rosout_min_level_ = declare_parameter<int>("rosout_min_level", 20, rosout_min_lvl_desc);
-
         if (enable_rosout)
         {
             // Create a typed Log channel (uses the built-in Log schema)
@@ -263,7 +225,7 @@ class DtRos2ToFoxgloveBridge : public rclcpp::Node
             else
             {
                 rosout_chan_.emplace(std::move(chRes.value()));
-                RCLCPP_INFO(get_logger(), "Relaying logs from '%s' to Foxglove Log channel /rosout (min level %d)", rosout_topic.c_str(), rosout_min_level_);
+                RCLCPP_INFO(get_logger(), "Relaying logs from '%s' to Foxglove Log channel)", rosout_topic.c_str());
                 // Best-effort QoS is fine for logs
                 auto qos = rclcpp::QoS(rclcpp::KeepLast(200)).best_effort();
                 rosout_sub_ =
@@ -277,8 +239,7 @@ class DtRos2ToFoxgloveBridge : public rclcpp::Node
   private:
     void onSchemas(const data_tamer_msgs::msg::Schemas& msg)
     {
-        for (const data_tamer_msgs::msg::Schema& s : msg.schemas)
-            onSchema(s);
+        for (const data_tamer_msgs::msg::Schema& s : msg.schemas) onSchema(s);
     }
 
     void onSchema(const data_tamer_msgs::msg::Schema& msg)
@@ -492,7 +453,6 @@ class DtRos2ToFoxgloveBridge : public rclcpp::Node
 
     std::optional<foxglove::schemas::LogChannel> rosout_chan_;
     rclcpp::Subscription<rcl_interfaces::msg::Log>::SharedPtr rosout_sub_;
-    int rosout_min_level_{ 20 };  // INFO default
     std::mutex namer_mtx_;
 
     bool use_protobuf_{ false };
@@ -507,32 +467,8 @@ class DtRos2ToFoxgloveBridge : public rclcpp::Node
         }
     }
 
-    static const char* levelToString(uint8_t lvl)
-    {
-        using rcl_interfaces::msg::Log;
-        switch (lvl)
-        {
-            case Log::DEBUG:
-                return "DEBUG";
-            case Log::INFO:
-                return "INFO";
-            case Log::WARN:
-                return "WARN";
-            case Log::ERROR:
-                return "ERROR";
-            case Log::FATAL:
-                return "FATAL";
-            default:
-                return "UNKNOWN";
-        }
-    }
-
     void onRosout(const rcl_interfaces::msg::Log& m)
     {
-        if (static_cast<int>(m.level) < rosout_min_level_)
-        {
-            return;  // filtered
-        }
         if (!rosout_chan_.has_value())
         {
             return;  // not enabled / failed to init
@@ -541,15 +477,30 @@ class DtRos2ToFoxgloveBridge : public rclcpp::Node
         // Build foxglove.schemas.Log
         foxglove::schemas::Log ev{};
         ev.timestamp = foxglove::schemas::Timestamp{ static_cast<uint32_t>(m.stamp.sec), static_cast<uint32_t>(m.stamp.nanosec) };
-        ev.level = toFoxgloveLevel(m.level);
+        ev.level = [&]
+        {
+            switch (m.level)
+            {
+                case rcl_interfaces::msg::Log::DEBUG:
+                    return foxglove::schemas::Log::LogLevel::DEBUG;
+                case rcl_interfaces::msg::Log::INFO:
+                    return foxglove::schemas::Log::LogLevel::INFO;
+                case rcl_interfaces::msg::Log::WARN:
+                    return foxglove::schemas::Log::LogLevel::WARNING;
+                case rcl_interfaces::msg::Log::ERROR:
+                    return foxglove::schemas::Log::LogLevel::ERROR;
+                case rcl_interfaces::msg::Log::FATAL:
+                    return foxglove::schemas::Log::LogLevel::FATAL;
+                default:
+                    return foxglove::schemas::Log::LogLevel::UNKNOWN;
+            }
+        }();
         ev.message = m.msg;
         ev.name = m.name;  // node name
         ev.file = m.file;
         ev.line = static_cast<uint32_t>(m.line);
 
-        // Log it (use ROS time as the log_time too, to keep everything consistent)
-        const uint64_t log_time_ns = static_cast<uint64_t>(m.stamp.sec) * 1000000000ULL + static_cast<uint64_t>(m.stamp.nanosec);
-        (void)rosout_chan_->log(ev, log_time_ns);
+        (void)rosout_chan_->log(ev, this->now().nanoseconds());
     }
 };
 }  // namespace data_tamer_tools

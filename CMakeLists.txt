@@ -18,6 +18,9 @@ find_package(data_tamer_cpp REQUIRED)
 find_package(data_tamer_msgs REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(mcap_vendor REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(backward_ros REQUIRED)
+find_package(foxglove_sdk_vendor REQUIRED)
 set(mcap_LIBRARIES mcap_vendor::mcap)
 set(mcap_INCLUDE_DIRS ${mcap_vendor_INCLUDE_DIRS})
 find_package(Protobuf REQUIRED)
@@ -25,20 +28,13 @@ find_library(PROTOBUF_SHARED_LIB NAMES protobuf PATHS /usr/lib/x86_64-linux-gnu 
 
 find_package(nlohmann_json REQUIRED)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
-include(FetchContent)
-FetchContent_Declare(
-  foxglove
-  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-  URL https://github.com/foxglove/foxglove-sdk/releases/download/sdk%2Fv0.14.2/foxglove-v0.14.2-cpp-x86_64-unknown-linux-gnu.zip
-  URL_HASH SHA256=574c3ce006d6131d6519b416f25ef37c5b2a0721ef49c894286c79a5a5e0b4fc
-)
-FetchContent_MakeAvailable(foxglove)
-file(GLOB FOXGLOVE_SOURCES CONFIGURE_DEPENDS
-  "${foxglove_SOURCE_DIR}/src/*.cpp"
-  "${foxglove_SOURCE_DIR}/src/server/*.cpp"
+rosidl_generate_interfaces(${PROJECT_NAME}
+  msg/LogDir.msg
+  srv/Rotate.srv
+  ADD_LINTER_TESTS
 )
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 add_library(${PROJECT_NAME}_tools SHARED src/helpers.cpp)
 target_link_libraries(${PROJECT_NAME}_tools
   ${data_tamer_cpp_TARGETS}
@@ -46,7 +42,7 @@ target_link_libraries(${PROJECT_NAME}_tools
   ${PROTOBUF_SHARED_LIB}
   ${mcap_LIBRARIES})
 target_include_directories(${PROJECT_NAME}_tools
- PUBLIC
+  PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
   ${Protobuf_INCLUDE_DIRS}
@@ -57,26 +53,27 @@ target_include_directories(${PROJECT_NAME}_tools
 add_library(mcap_sink SHARED
     include/${PROJECT_NAME}/sinks/mcap_sink.hpp
     src/mcap_sink.cpp)
-target_compile_definitions(mcap_sink PUBLIC USING_ROS2=1 )
 target_include_directories(mcap_sink
- PUBLIC
+  PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
   ${nlohmann_json_INCLUDE_DIRS}
   ${Protobuf_INCLUDE_DIRS}
 )
+rosidl_get_typesupport_target(cpp_typesupport_target "${PROJECT_NAME}" "rosidl_typesupport_cpp")
+add_dependencies(mcap_sink ${PROJECT_NAME})
 target_link_libraries(mcap_sink
   ${data_tamer_cpp_TARGETS}
   ${nlohmann_json_LIBRARIES}
   ${mcap_LIBRARIES}
   ${PROJECT_NAME}_tools
-  ${PROTOBUF_SHARED_LIB})
+  ${PROTOBUF_SHARED_LIB}
+  ${cpp_typesupport_target})
 
 add_library(foxglove_relay SHARED src/foxglove_relay.cpp)
 rclcpp_components_register_node(foxglove_relay PLUGIN "data_tamer_tools::DtRos2ToFoxgloveBridge" EXECUTABLE foxglove_relay_node)
-target_sources(foxglove_relay PRIVATE ${FOXGLOVE_SOURCES})
 target_link_libraries(foxglove_relay
-  ${foxglove_SOURCE_DIR}/lib/libfoxglove.a
+  foxglove_sdk_vendor::foxglove_sdk
   ${data_tamer_cpp_TARGETS}
   ${data_tamer_msgs_TARGETS}
   ${rclcpp_components_TARGETS}
@@ -85,11 +82,9 @@ target_link_libraries(foxglove_relay
   ${PROJECT_NAME}_tools
   ${PROTOBUF_SHARED_LIB})
 target_include_directories(foxglove_relay
- PUBLIC
+  PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<BUILD_INTERFACE:${nlohmann_json_INCLUDE_DIRS}>
-  $<BUILD_INTERFACE:${foxglove_SOURCE_DIR}/include>
-  $<BUILD_INTERFACE:${foxglove_SOURCE_DIR}/include/foxglove>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
   $<INSTALL_INTERFACE:include>
   ${Protobuf_INCLUDE_DIRS}
@@ -100,7 +95,7 @@ target_link_libraries(snapshot_recorder
   ${rclcpp_TARGETS}
   ${data_tamer_msgs_TARGETS})
 target_include_directories(snapshot_recorder
- PUBLIC
+  PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
@@ -119,13 +114,55 @@ target_include_directories(mcap_converter
     ${nlohmann_json_INCLUDE_DIRS}
     ${Protobuf_INCLUDE_DIRS})
 
+add_library(rosout_logger_component SHARED src/rosout_logger.cpp)
+rclcpp_components_register_node(rosout_logger_component PLUGIN "data_tamer_tools::RosoutLogger" EXECUTABLE rosout_logger)
+rosidl_get_typesupport_target(cpp_typesupport_target "${PROJECT_NAME}" "rosidl_typesupport_cpp")
+add_dependencies(rosout_logger_component ${PROJECT_NAME})
+target_link_libraries(rosout_logger_component
+  foxglove_sdk_vendor::foxglove_sdk
+  ${rclcpp_TARGETS}
+  ${rclcpp_components_TARGETS}
+  ${rcl_interfaces_TARGETS}
+  ${mcap_LIBRARIES}
+  ${cpp_typesupport_target}
+)
+target_include_directories(rosout_logger_component
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    ${mcap_INCLUDE_DIRS})
+
+add_library(log_rotation_coordinator_component SHARED src/log_rotation_coordinator.cpp)
+rclcpp_components_register_node(log_rotation_coordinator_component PLUGIN
+              "data_tamer_tools::LogRotationCoordinator" EXECUTABLE log_rotation_coordinator)
+rosidl_get_typesupport_target(cpp_typesupport_target "${PROJECT_NAME}" "rosidl_typesupport_cpp")
+add_dependencies(log_rotation_coordinator_component ${PROJECT_NAME})
+target_link_libraries(log_rotation_coordinator_component
+  ${rclcpp_TARGETS}
+  ${rclcpp_components_TARGETS}
+  ${cpp_typesupport_target}
+)
+target_include_directories(log_rotation_coordinator_component
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
+
 install(
   DIRECTORY include/
   DESTINATION include
 )
 
 install(
-  TARGETS ${PROJECT_NAME}_tools mcap_sink foxglove_relay
+  DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(
+  TARGETS ${PROJECT_NAME}_tools
+          mcap_sink
+          foxglove_relay
+          rosout_logger_component
+          log_rotation_coordinator_component
   EXPORT ${PROJECT_NAME}Targets
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
@@ -139,7 +176,7 @@ install(
 )
 
 ament_export_targets(${PROJECT_NAME}Targets)
-ament_export_dependencies(data_tamer_cpp rclcpp rclcpp_components nlohmann_json)
+ament_export_dependencies(data_tamer_cpp rclcpp rclcpp_components nlohmann_json foxglove_sdk_vendor)
 ament_export_libraries(mcap_sink foxglove_relay)
 ament_package()
 
@@ -181,6 +218,17 @@ if(BUILD_TESTING)
     add_test(NAME helpers_test COMMAND $<TARGET_FILE:helpers_test>)
     add_test(NAME mcap_sink_test COMMAND $<TARGET_FILE:mcap_sink_test>)
 
+    find_package(ament_cmake_gtest REQUIRED)
+
+    find_package(ament_cmake_cppcheck REQUIRED)
+    ament_cppcheck()
+
+    find_package(ament_cmake_clang_format REQUIRED)
+    ament_clang_format(CONFIG_FILE ${PROJECT_SOURCE_DIR}/.clang-format)
+
+    find_package(ament_cmake_lint_cmake REQUIRED)
+    ament_lint_cmake()
+
     install(
       DIRECTORY test/data
       DESTINATION share/${PROJECT_NAME}/test
@@ -191,19 +239,18 @@ if(BUILD_EXAMPLES)
     add_executable(sinks_example examples/json_mcap_sink.cpp)
     target_include_directories(sinks_example
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-               $<INSTALL_INTERFACE:include>)
+                $<INSTALL_INTERFACE:include>)
     target_link_libraries(sinks_example PUBLIC ${PROJECT_NAME}_tools mcap_sink ${data_tamer_cpp_TARGETS})
 
     add_executable(relay_sources_example examples/relay_sources_example.cpp)
     target_include_directories(relay_sources_example
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-               $<INSTALL_INTERFACE:include>)
+              $<INSTALL_INTERFACE:include>)
     target_link_libraries(relay_sources_example PUBLIC mcap_sink ${data_tamer_cpp_TARGETS})
 
     install(
         TARGETS sinks_example relay_sources_example
-        DESTINATION lib/${PROJECT_NAME}
-        )
+        DESTINATION lib/${PROJECT_NAME})
 endif()
 
 if(BUILD_BENCHMARKS)
