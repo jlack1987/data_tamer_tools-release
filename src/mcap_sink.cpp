@@ -7,6 +7,9 @@
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <mutex>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
 
 #define MCAP_IMPLEMENTATION
 
@@ -15,23 +18,19 @@ namespace data_tamer_tools
 
 // ----------- ctor helpers -----------
 
-mcap::McapWriterOptions McapSink::makeOptions(Format fmt, Compression compression, uint64_t chunk_size)
+mcap::McapWriterOptions McapSink::makeOptions(Format fmt, Compression comp, std::optional<uint64_t> chunk)
 {
-    // IMPORTANT: profile must match the messageEncoding you will write.
     mcap::McapWriterOptions o(fmt == Format::Protobuf ? "protobuf" : "json");
-    o.chunkSize = chunk_size;
-    switch (compression)
+    if (chunk.has_value() && *chunk == 0)
     {
-        case Compression::Zstd:
-            o.compression = mcap::Compression::Zstd;
-            break;
-        case Compression::Lz4:
-            o.compression = mcap::Compression::Lz4;
-            break;
-        default:
-            o.compression = mcap::Compression::None;
-            break;
+        o.noChunking = true;
+        o.chunkSize = mcap::DefaultChunkSize;  // ignored when noChunking=true
     }
+    else
+    {
+        o.chunkSize = chunk.value_or(mcap::DefaultChunkSize);
+    }
+    o.compression = (comp == Compression::Zstd) ? mcap::Compression::Zstd : (comp == Compression::Lz4) ? mcap::Compression::Lz4 : mcap::Compression::None;
     return o;
 }
 
@@ -103,34 +102,91 @@ DataTamerParser::Schema McapSink::toParserSchema(const DataTamer::Schema& s)
 
 // ----------- constructors -----------
 
-McapSink::McapSink(const std::string& filepath, const mcap::McapWriterOptions& options, Format fmt) : filepath_(filepath), format_(fmt)
+McapSink::McapSink(const std::string& filepath, const mcap::McapWriterOptions& options, Format fmt, bool append_timestamp)
+  : format_(fmt), append_timestamp_(append_timestamp)
 {
-    openFile(filepath_, options);
+    base_filename_ = std::filesystem::path(filepath).filename().string();
+    auto resolved = applyTimestampIfNeeded(filepath);
+    openFile(resolved, options);
 }
 
-McapSink::McapSink(std::string const& filepath, Format fmt, Compression compression, uint64_t chunk_size)
+McapSink::McapSink(std::string const& filepath, Format fmt, Compression compression, std::optional<uint64_t> chunk_size, bool append_timestamp)
+  : format_(fmt), append_timestamp_(append_timestamp)
 {
-    auto o = makeOptions(fmt, compression, chunk_size);
-    filepath_ = filepath;
-    format_ = fmt;
-    openFile(filepath_, o);
+    auto o = makeOptions(fmt, compression, chunk_size.value_or(mcap::DefaultChunkSize));
+    base_filename_ = std::filesystem::path(filepath).filename().string();
+    auto resolved = applyTimestampIfNeeded(filepath);
+    openFile(resolved, o);
 }
 
-void McapSink::openFile(std::string const& filepath, const mcap::McapWriterOptions& options)
+data_tamer_tools::McapSink::McapSink(const rclcpp::Node::SharedPtr& node, const std::string& filepath, const mcap::McapWriterOptions& options, Format fmt,
+                                     bool append_timestamp)
+  : format_(fmt), append_timestamp_(append_timestamp)
+{
+    base_filename_ = std::filesystem::path(filepath).filename().string();
+    auto resolved = applyTimestampIfNeeded(filepath);
+    openFile(resolved, options);
+    setupRotationControl(node);
+}
+
+data_tamer_tools::McapSink::McapSink(const rclcpp::Node::SharedPtr& node, const std::string& filepath, Format fmt, Compression compression,
+                                     std::optional<uint64_t> chunk_size, bool append_timestamp)
+  : format_(fmt), append_timestamp_(append_timestamp)
+{
+    base_filename_ = std::filesystem::path(filepath).filename().string();
+
+    auto opts = makeOptions(fmt, compression, /*chunk*/ chunk_size.value_or(1024 * 768));
+    if (chunk_size.has_value() && *chunk_size == 0)
+    {
+        opts.noChunking = true;
+    }
+    auto resolved = applyTimestampIfNeeded(filepath);
+    openFile(resolved, opts);
+    setupRotationControl(node);
+}
+
+void data_tamer_tools::McapSink::openFile(std::string const& filepath, const mcap::McapWriterOptions& options)
 {
     std::scoped_lock lk(mutex_);
-    writer_ = std::make_unique<mcap::McapWriter>();
-    auto status = writer_->open(filepath, options);
-    if (!status.ok())
-    {
-        throw std::runtime_error("Failed to open MCAP file for writing");
-    }
-    forced_stop_recording_ = false;
-    // clean up, in case this was opened a second time
-    hash_to_channel_id_.clear();
-    parser_schemas_.clear();
-    proto_runtimes_.clear();
+
+    last_options_ = options;  // remember for rotations
+    filepath_ = filepath;     // current full path (dir + base_filename_)
+
+    // Tear down old dynamic-proto state before opening a new file
     scratch_msgs_.clear();
+    proto_runtimes_.clear();
+    parser_schemas_.clear();
+    hash_to_channel_id_.clear();
+
+    writer_ = std::make_unique<mcap::McapWriter>();
+    auto status = writer_->open(filepath_, options);
+    RCLCPP_INFO(rclcpp::get_logger("McapSink"), "Opening file: %s (base='%s', append_ts=%d)", filepath_.c_str(), base_filename_.c_str(), append_timestamp_);
+}
+
+std::string McapSink::applyTimestampIfNeeded(const std::string& filepath) const
+{
+    if (!append_timestamp_)
+    {
+        return filepath;
+    }
+
+    std::filesystem::path path(filepath);
+    const std::string stem = path.stem().string();
+    const std::string ext = path.extension().string();
+    path.replace_filename(stem + "_" + makeTimestampString() + ext);
+    const std::string result = path.string();
+    return result;
+}
+
+std::string McapSink::makeTimestampString()
+{
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+    std::tm local_tm;
+    localtime_r(&now_time, &local_tm);
+    std::ostringstream oss;
+    oss << std::put_time(&local_tm, "%Y-%m-%d_%H-%M-%S");
+    return oss.str();
 }
 
 McapSink::~McapSink()
@@ -140,6 +196,66 @@ McapSink::~McapSink()
     if (writer_)
     {
         writer_->close();
+    }
+}
+
+void data_tamer_tools::McapSink::setupRotationControl(const rclcpp::Node::SharedPtr& node)
+{
+    // Param name: rotate_topic (empty => disable)
+    // default: "/data_tamer/rotate_mcap" (change if you prefer)
+    const std::string topic = node->declare_parameter<std::string>("rotate_topic", "/data_tamer/rotate_dir");
+    if (topic.empty())
+        return;
+
+    rclcpp::QoS qos(1);
+    qos.transient_local().reliable();
+
+    rotate_sub_ = node->create_subscription<data_tamer_tools::msg::LogDir>(topic, qos,
+                                                                           [this](data_tamer_tools::msg::LogDir::SharedPtr msg)
+                                                                           {
+                                                                               if (!msg)
+                                                                                   return;
+                                                                               rotateToDirectory(msg->directory);
+                                                                           });
+}
+
+void data_tamer_tools::McapSink::rotateToDirectory(const std::string& new_dir)
+{
+    if (new_dir.empty())
+    {
+        std::cerr << "[McapSink] rotateToDirectory: new_dir is empty" << std::endl;
+        return;
+    }
+
+    std::filesystem::path dir(new_dir);
+    std::filesystem::path current_dir = std::filesystem::path(filepath_).parent_path();
+
+    // If new directory is the same as current directory, do nothing
+    if (dir == current_dir)
+    {
+        std::cerr << "[McapSink] rotateToDirectory: new_dir is the same as current directory" << std::endl;
+        return;
+    }
+
+    std::error_code ec;
+
+    // Only create directory if it doesn't already exist
+    if (!std::filesystem::exists(dir, ec))
+    {
+        std::filesystem::create_directories(dir, ec);  // best effort
+    }
+
+    // Compose new path as <dir>/<base_filename_> (+ timestamp if enabled)
+    std::filesystem::path new_path = dir / base_filename_;
+
+    // Use same options; restartRecording re-adds channels/schemas under mutex
+    try
+    {
+        restartRecording(new_path.string(), last_options_);
+    }
+    catch (const std::exception& e)
+    {
+        throw std::runtime_error("Failed to restart mcap recording");
     }
 }
 
@@ -297,14 +413,15 @@ void McapSink::stopRecording()
 void McapSink::restartRecording(const std::string& filepath, const mcap::McapWriterOptions& options)
 {
     std::scoped_lock lk(mutex_);
-    filepath_ = filepath;
-    openFile(filepath_, options);
+    auto resolved = applyTimestampIfNeeded(filepath);
+    openFile(resolved, options);
 
     // rebuild the channels using the original format_
     for (auto const& [name, hash] : channel_names_to_hash_)
     {
         addChannel(name, schemas_[hash]);
     }
+    forced_stop_recording_ = false;
 }
 
 }  // namespace data_tamer_tools
