@@ -3,22 +3,19 @@
 #include <data_tamer/data_sink.hpp>
 #include <data_tamer_parser/data_tamer_parser.hpp>
 #include <data_tamer_tools/helpers.hpp>
+#include <data_tamer_tools/msg/log_dir.hpp>
 
 #include <google/protobuf/descriptor.h>
 #include <google/protobuf/dynamic_message.h>
+#include <mcap/writer.hpp>
+#include <rclcpp/rclcpp.hpp>
 
 #include <mutex>
 #include <unordered_map>
 #include <memory>
 #include <string>
 #include <vector>
-
-// Forward declaration
-namespace mcap
-{
-class McapWriter;
-class McapWriterOptions;
-}  // namespace mcap
+#include <filesystem>
 
 namespace data_tamer_tools
 {
@@ -44,13 +41,29 @@ class McapSink : public DataTamer::DataSinkBase
     /**
      * @brief mcap sink with explicit writer options. Default format = Protobuf.
      */
-    McapSink(std::string const& filepath, const mcap::McapWriterOptions& options, Format fmt = Format::Protobuf);
+    McapSink(std::string const& filepath, const mcap::McapWriterOptions& options, Format fmt = Format::Protobuf, bool append_timestamp = false);
+    McapSink(const rclcpp::Node::SharedPtr& n, std::string const& filepath, const mcap::McapWriterOptions& options, Format fmt = Format::Protobuf,
+             bool append_timestamp = false);
 
     /**
      * @brief mcap sink convenience ctor (compression/chunk). Default format = Protobuf.
+     * @param filepath file path of the new file (should be ".mcap" extension)
+     * @param fmt format of the data to write
+     * @param compression compression algorithm to use
+     * @param chunk_size optional chunk size to use, default is mcap::DefaultChunkSize
      */
-    McapSink(std::string const& filepath, Format fmt = Format::Protobuf, Compression compression = Compression::Zstd, uint64_t chunk_size = 1024 * 768);
-
+    McapSink(std::string const& filepath, Format fmt = Format::Protobuf, Compression compression = Compression::Zstd, std::optional<uint64_t> chunk_size = std::nullopt,
+             bool append_timestamp = false);
+    /**
+     * @brief mcap sink convenience ctor (compression/chunk). Default format = Protobuf.
+     * @param node for subscribing to log rotation topic
+     * @param filepath file path of the new file (should be ".mcap" extension)
+     * @param fmt format of the data to write
+     * @param compression compression algorithm to use
+     * @param chunk_size optional chunk size to use, default is mcap::DefaultChunkSize
+     */
+    McapSink(const rclcpp::Node::SharedPtr& n, std::string const& filepath, Format fmt = Format::Protobuf, Compression compression = Compression::Zstd,
+             std::optional<uint64_t> chunk_size = std::nullopt, bool append_timestamp = false);
     ~McapSink() override;
 
     void addChannel(std::string const& channel_name, DataTamer::Schema const& schema) override;
@@ -64,13 +77,21 @@ class McapSink : public DataTamer::DataSinkBase
      * @param options  mcap writer options struct
      */
     void restartRecording(std::string const& filepath, const mcap::McapWriterOptions& options);
+    // Convert directory from msg into new full path (<dir>/<base_filename_>) and rotate
+    void rotateToDirectory(const std::string& new_dir);
 
-    static mcap::McapWriterOptions makeOptions(Format fmt, Compression compression, uint64_t chunk_size);
+    static mcap::McapWriterOptions makeOptions(Format fmt, Compression compression, std::optional<uint64_t> chunk_size = std::nullopt);
 
   private:
+    mcap::McapWriterOptions last_options_{ "protobuf" };
+    // Control subscription (optional)
+    rclcpp::Subscription<data_tamer_tools::msg::LogDir>::SharedPtr rotate_sub_;
+
     // --- config/state ---
     std::string filepath_;
+    std::string base_filename_;  // template filename captured from first filepath (no timestamp)
     Format format_ = Format::Json;
+    bool append_timestamp_{ false };
 
     std::unique_ptr<mcap::McapWriter> writer_;
 
@@ -88,9 +109,14 @@ class McapSink : public DataTamer::DataSinkBase
     std::recursive_mutex mutex_;
     size_t sequence_ = 0;
 
-    void openFile(std::string const& filepath, const mcap::McapWriterOptions& options);
-
     // Minimal converter DT -> Parser schema so we can reuse encodeSnapshot()
     static DataTamerParser::Schema toParserSchema(const DataTamer::Schema& s);
+    // Helper to wire subscription from a node & param
+    void setupRotationControl(const rclcpp::Node::SharedPtr& node);
+
+    // openFile now remembers options + filepath (we’ll use base_filename_ set at first construction)
+    void openFile(std::string const& filepath, const mcap::McapWriterOptions& options);
+    std::string applyTimestampIfNeeded(const std::string& filepath) const;
+    static std::string makeTimestampString();
 };
 }  // namespace data_tamer_tools
