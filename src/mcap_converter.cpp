@@ -46,11 +46,11 @@ int main(int argc, char** argv)
     }
     const std::string inPath = argv[1];
     const std::string outPath = argv[2];
-    
+
     // Parse optional arguments
     mcap::Compression compression = mcap::Compression::Zstd;
     std::optional<uint64_t> chunkSize;
-    
+
     for (int i = 3; i < argc; i++)
     {
         std::string arg = argv[i];
