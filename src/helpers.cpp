@@ -506,8 +506,7 @@ nlohmann::json serializeSnapshotToJson(const DataTamerParser::Schema& schema, co
     {
         if (!arr.is_array())
             arr = nlohmann::json::array();
-        while (arr.size() < len)
-            arr.push_back(nullptr);
+        while (arr.size() < len) arr.push_back(nullptr);
     };
 
     // Recursively process one field (scalar/vector, basic/composite).
@@ -561,8 +560,7 @@ nlohmann::json serializeSnapshotToJson(const DataTamerParser::Schema& schema, co
         if (!tf.is_vector)
         {
             // single composite instance: recurse each member under the same base path
-            for (const auto& sub : subs)
-                process(base, sub);
+            for (const auto& sub : subs) process(base, sub);
         }
         else
         {
@@ -623,8 +621,7 @@ nlohmann::json serializeSnapshotToJson(const DataTamerParser::Schema& schema, co
                                     nlohmann::json& inner = out[leaf_base][i];
                                     if (!inner.is_array())
                                         inner = nlohmann::json::array();
-                                    while (inner.size() < ilen)
-                                        inner.push_back(nullptr);
+                                    while (inner.size() < ilen) inner.push_back(nullptr);
                                     for (uint32_t k = 0; k < ilen; ++k)
                                     {
                                         const auto vv = DataTamerParser::DeserializeToVarNumber(t.type, buf);
@@ -637,8 +634,7 @@ nlohmann::json serializeSnapshotToJson(const DataTamerParser::Schema& schema, co
                                 const auto jt = schema.custom_types.find(t.type_name);
                                 if (jt == schema.custom_types.end())
                                     throw std::runtime_error(std::string("Unknown nested custom type: ") + t.type_name);
-                                for (const auto& s2 : jt->second)
-                                    process_nested(leaf_base, s2);
+                                for (const auto& s2 : jt->second) process_nested(leaf_base, s2);
                             }
                         };
 
@@ -676,8 +672,7 @@ std::string stripIndicesKeepSlashes(const std::string& s)
         char c = s[i];
         if (c == '[')
         {
-            while (i < s.size() && s[i] != ']')
-                ++i;
+            while (i < s.size() && s[i] != ']') ++i;
             continue;
         }
         out.push_back(c);
@@ -786,8 +781,7 @@ std::vector<FlatField> flattenSchema(const DataTamerParser::Schema& s)
 {
     std::vector<FlatField> out;
     out.reserve(s.fields.size());
-    for (const auto& f : s.fields)
-        flattenType("", f, s.custom_types, out);
+    for (const auto& f : s.fields) flattenType("", f, s.custom_types, out);
     return out;
 }
 
@@ -795,8 +789,7 @@ template <class AddDefaultFn>
 static void ensureRepeatedSize(google::protobuf::Message* m, const FieldDescriptor* fd, int want, const AddDefaultFn& add_default)
 {
     auto* refl = m->GetReflection();
-    while (refl->FieldSize(*m, fd) < want)
-        add_default();
+    while (refl->FieldSize(*m, fd) < want) add_default();
 }
 
 ProtoRuntime buildProto(const DataTamerParser::Schema& schema)
@@ -890,8 +883,7 @@ ProtoRuntime buildProto(const DataTamerParser::Schema& schema)
 static inline void dbgMask(const DataTamerParser::BufferSpan& m)
 {
     fprintf(stderr, "[DBG] active_mask bytes (%zu):", m.size);
-    for (size_t i = 0; i < m.size; ++i)
-        fprintf(stderr, " %02X", m.data[i]);
+    for (size_t i = 0; i < m.size; ++i) fprintf(stderr, " %02X", m.data[i]);
     fputc('\n', stderr);
 }
 
@@ -1018,8 +1010,7 @@ bool encodeSnapshot(const DataTamerParser::Schema& schema, const DataTamerParser
     auto ensureRepeatedSize = [&](const google::protobuf::FieldDescriptor* fd, int need)
     {
         int cur = refl->FieldSize(*m, fd);
-        for (; cur < need; ++cur)
-            add_default(fd);
+        for (; cur < need; ++cur) add_default(fd);
     };
 
     auto set_scalar_from_var = [&](const google::protobuf::FieldDescriptor* fd, const DataTamerParser::VarNumber& vn)

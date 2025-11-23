@@ -1022,8 +1022,7 @@ TEST(EncodeFast, DynamicCompositeVector)
     schema.fields.push_back(rpm);
 
     // Hash like writer does
-    for (const auto& f : schema.fields)
-        schema.hash = DataTamerParser::AddFieldToHash(f, schema.hash);
+    for (const auto& f : schema.fields) schema.hash = DataTamerParser::AddFieldToHash(f, schema.hash);
 
     // Build proto runtime
     auto rt = data_tamer_tools::buildProto(schema);
@@ -1132,8 +1131,7 @@ TEST(EncodeFast, EmptyDynamicVector)
     schema.fields.push_back(rpm);
 
     // Compute hash like writer does
-    for (const auto& f : schema.fields)
-        schema.hash = AddFieldToHash(f, schema.hash);
+    for (const auto& f : schema.fields) schema.hash = AddFieldToHash(f, schema.hash);
 
     // Build proto runtime
     auto rt = data_tamer_tools::buildProto(schema);
@@ -1481,8 +1479,7 @@ TEST(EncodeFast, NestedComposite_ScalarMembers)
     schema.fields.push_back(rpm);
 
     // Hash like writer
-    for (const auto& f : schema.fields)
-        schema.hash = DataTamerParser::AddFieldToHash(f, schema.hash);
+    for (const auto& f : schema.fields) schema.hash = DataTamerParser::AddFieldToHash(f, schema.hash);
 
     // Build proto runtime
     auto rt = data_tamer_tools::buildProto(schema);
@@ -1605,8 +1602,7 @@ TEST(EncodeFast, NestedComposite_WithFixedVectorChild_AndInactiveSibling)
     schema.fields.push_back(rpm);
 
     // hash
-    for (const auto& f : schema.fields)
-        schema.hash = AddFieldToHash(f, schema.hash);
+    for (const auto& f : schema.fields) schema.hash = AddFieldToHash(f, schema.hash);
 
     auto rt = buildProto(schema);
 
@@ -1832,8 +1828,7 @@ TEST(EncodeFast, ShortPayload_FixedCompositeVec_Throws)
     schema.fields.push_back(poses);
 
     // hash like writer
-    for (const auto& f : schema.fields)
-        schema.hash = AddFieldToHash(f, schema.hash);
+    for (const auto& f : schema.fields) schema.hash = AddFieldToHash(f, schema.hash);
 
     auto rt = data_tamer_tools::buildProto(schema);
 
@@ -1843,8 +1838,7 @@ TEST(EncodeFast, ShortPayload_FixedCompositeVec_Throws)
     // Payload UNDERFILLED: only 1 Pose (x,y) = 16 bytes instead of 32
     auto push_u64 = [&](uint64_t u, std::vector<uint8_t>& buf)
     {
-        for (int i = 0; i < 8; i++)
-            buf.push_back(uint8_t(u >> (8 * i)));
+        for (int i = 0; i < 8; i++) buf.push_back(uint8_t(u >> (8 * i)));
     };
     auto d2u = [&](double d)
     {
@@ -1892,8 +1886,7 @@ TEST(EncodeFast, ShortPayload_DynamicCompositeVec_Throws)
     schema.fields.push_back(poses);
 
     // Hash like writer does
-    for (const auto& f : schema.fields)
-        schema.hash = DataTamerParser::AddFieldToHash(f, schema.hash);
+    for (const auto& f : schema.fields) schema.hash = DataTamerParser::AddFieldToHash(f, schema.hash);
 
     // Build proto/runtime
     auto rt = data_tamer_tools::buildProto(schema);

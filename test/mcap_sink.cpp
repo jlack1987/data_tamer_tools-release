@@ -802,3 +802,101 @@ TEST_F(McapSinkTest, MixedFormats_SideBySide)
         EXPECT_FLOAT_EQ(refl->GetRepeatedFloat(*msg, fd_vals, 2), vals[2]);
     }
 }
+
+class McapSinkRotateNoRosTest : public ::testing::Test
+{
+  protected:
+    void TearDown() override
+    {
+        for (auto& p : trash_)
+        {
+            std::error_code ec;
+            std::filesystem::remove_all(p, ec);
+        }
+    }
+    std::vector<std::filesystem::path> trash_;
+    static void sleep_a_tick()
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    }
+};
+
+TEST_F(McapSinkRotateNoRosTest, RotateToNewDir_WritesThere)
+{
+    namespace fs = std::filesystem;
+    fs::path dir1 = fs::temp_directory_path() / "mcap_rotate_noros_dir1";
+    fs::path dir2 = fs::temp_directory_path() / "mcap_rotate_noros_dir2";
+    fs::create_directories(dir1);
+    trash_.push_back(dir1);
+    trash_.push_back(dir2);
+
+    const std::string basefile = "rosout.mcap";
+    fs::path initial_path = dir1 / basefile;
+
+    auto sink =
+        std::make_shared<data_tamer_tools::McapSink>(initial_path.string(), data_tamer_tools::McapSink::Format::Json, data_tamer_tools::McapSink::Compression::None,
+                                                     /*chunk_size*/ 0);
+
+    auto chan = DataTamer::LogChannel::create("ch_json_rotate_noros");
+    chan->addDataSink(sink);
+
+    uint32_t rpm = 100;
+    chan->registerValue("rpm", &rpm);
+
+    // initial write -> dir1/rosout.mcap
+    chan->takeSnapshot();
+    sink->stopRecording();
+    sleep_a_tick();
+    ASSERT_TRUE(fs::exists(initial_path));
+    auto size_before = fs::file_size(initial_path);
+    ASSERT_GT(size_before, 0u);
+
+    // rotate to dir2
+    sink->rotateToDirectory(dir2.string());
+
+    // next write -> dir2/rosout.mcap
+    rpm = 1234;
+    chan->takeSnapshot();
+    sink->stopRecording();
+    sleep_a_tick();
+
+    fs::path rotated_path = dir2 / basefile;
+    ASSERT_TRUE(fs::exists(rotated_path));
+    auto size_after = fs::file_size(rotated_path);
+    ASSERT_GT(size_after, 0u);
+}
+
+TEST_F(McapSinkRotateNoRosTest, RotateBeforeFirstWrite)
+{
+    namespace fs = std::filesystem;
+    fs::path dirA = fs::temp_directory_path() / "mcap_rotate_noros_pre_A";
+    fs::path dirB = fs::temp_directory_path() / "mcap_rotate_noros_pre_B";
+    fs::create_directories(dirA);
+    fs::create_directories(dirB);
+    trash_.push_back(dirA);
+    trash_.push_back(dirB);
+
+    const std::string basefile = "rosout.mcap";
+    fs::path initial_path = dirA / basefile;
+
+    auto sink =
+        std::make_shared<data_tamer_tools::McapSink>(initial_path.string(), data_tamer_tools::McapSink::Format::Json, data_tamer_tools::McapSink::Compression::None,
+                                                     /*chunk_size*/ 0);
+
+    auto chan = DataTamer::LogChannel::create("ch_json_pre_noros");
+    chan->addDataSink(sink);
+
+    // rotate immediately
+    sink->rotateToDirectory(dirB.string());
+
+    // first write should go to dirB
+    uint32_t rpm = 42;
+    chan->registerValue("rpm", &rpm);
+    chan->takeSnapshot();
+    sink->stopRecording();
+    sleep_a_tick();
+
+    fs::path bpath = dirB / basefile;
+    ASSERT_TRUE(fs::exists(bpath));
+    ASSERT_GT(fs::file_size(bpath), 0u);
+}
