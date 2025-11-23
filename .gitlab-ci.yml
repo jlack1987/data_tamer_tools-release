@@ -1,0 +1,56 @@
+image: ros:jazzy
+
+stages:
+  - build_and_test
+
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+
+build_and_test:
+  stage: build_and_test
+  
+  # Run on merge requests to main and on changes to main
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  
+  before_script:
+    # Set up workspace directory structure
+    - mkdir -p /ros_ws/src
+    - cp -r $CI_PROJECT_DIR /ros_ws/src/data_tamer_tools
+    - cd /ros_ws
+    
+    # Source ROS 2 environment
+    - source /opt/ros/jazzy/setup.bash
+    
+    # Install dependencies
+    - apt-get update
+    - rosdep update
+    - rosdep install --from-paths src --ignore-src -y --rosdistro jazzy
+  
+  script:
+    # Build the workspace
+    - colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+    
+    # Source the built workspace
+    - source install/setup.bash
+    # Allow slow versions of cppcheck
+    - export AMENT_CPPCHECK_ALLOW_SLOW_VERSIONS=1
+    # Run tests
+    - colcon test --packages-select data_tamer_tools
+    
+    # Show test results
+    - colcon test-result --verbose
+
+    - mv log/ $CI_PROJECT_DIR/log
+    - mv build/data_tamer_tools/test_results/ $CI_PROJECT_DIR/test_results
+  
+  artifacts:
+    when: always
+    paths:
+      - log/
+      - test_results/
+    reports:
+      junit: test_results/**/*.xml
+    expire_in: 1 week
+
