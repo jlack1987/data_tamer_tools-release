@@ -97,8 +97,7 @@ struct SourceB
     void tick(std::shared_ptr<DataTamer::LogChannel> ch, size_t t)
     {
         rpm += 25;
-        for (size_t i = 0; i < voltages.size(); ++i)
-            voltages[i] += 0.01;
+        for (size_t i = 0; i < voltages.size(); ++i) voltages[i] += 0.01;
         volts_val->set(voltages);
 
         // flip statuses size/pattern
@@ -153,8 +152,7 @@ int main(int argc, char** argv)
     std::thread spin_thr(
         [&]
         {
-            while (running)
-                exec->spin_some();
+            while (running) exec->spin_some();
         });
 
     // Publish at ~10 Hz
