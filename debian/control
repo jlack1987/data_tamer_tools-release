@@ -1,0 +1,12 @@
+Source: ros-jazzy-data-tamer-tools
+Section: misc
+Priority: optional
+Maintainer: Jordan Lack <jlack1987@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), libprotobuf-dev, libprotoc-dev, nlohmann-json3-dev, protobuf-compiler, ros-jazzy-ament-cmake, ros-jazzy-ament-cmake-clang-format <!nocheck>, ros-jazzy-ament-cmake-cppcheck <!nocheck>, ros-jazzy-ament-cmake-gtest <!nocheck>, ros-jazzy-ament-cmake-lint-cmake <!nocheck>, ros-jazzy-ament-index-cpp <!nocheck>, ros-jazzy-ament-lint <!nocheck>, ros-jazzy-backward-ros, ros-jazzy-data-tamer-cpp, ros-jazzy-data-tamer-msgs, ros-jazzy-foxglove-sdk-vendor, ros-jazzy-mcap-vendor, ros-jazzy-rcl-interfaces, ros-jazzy-rclcpp, ros-jazzy-rclcpp-components, ros-jazzy-rosidl-default-generators, ros-jazzy-ros-workspace, ros-jazzy-rosidl-typesupport-fastrtps-c, ros-jazzy-rosidl-typesupport-fastrtps-cpp
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-jazzy-data-tamer-tools
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libprotobuf-dev, libprotoc-dev, nlohmann-json3-dev, protobuf-compiler, ros-jazzy-backward-ros, ros-jazzy-data-tamer-cpp, ros-jazzy-data-tamer-msgs, ros-jazzy-foxglove-sdk-vendor, ros-jazzy-mcap-vendor, ros-jazzy-rcl-interfaces, ros-jazzy-rclcpp, ros-jazzy-rclcpp-components, ros-jazzy-ros-workspace
+Description: Set of tools for using Foxglove with data tamer
